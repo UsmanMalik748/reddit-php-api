@@ -73,17 +73,18 @@ class Authenticator implements AuthenticatorInterface
         }
 
         try {
-            $accessToken = $this->getAccessTokenFromCode($urlGenerator, $code);
+            
+            $response = $this->getAccessTokenFromCode($urlGenerator, $code);
         } catch (RedditException $e) {
             // code was bogus, so everything based on it should be invalidated.
             $storage->clearAll();
             throw $e;
         }
-
+        $accessToken = $response['access_token'] ?? null;
         $storage->set('code', $code);
         $storage->set('access_token', $accessToken);
 
-        return $accessToken;
+        return $response;
     }
 
     /**
@@ -103,43 +104,119 @@ class Authenticator implements AuthenticatorInterface
      */
     protected function getAccessTokenFromCode(RedditUrlGeneratorInterface $urlGenerator, $code)
     {
+       
         if (empty($code)) {
             throw new RedditException('Could not get access token: The code was empty.');
         }
 
         $redirectUri = $this->getStorage()->get('redirect_uri');
+
         try {
-            $url = $urlGenerator->getUrl('www', 'v1/accessToken');
-            $headers = ['Content-Type' => 'application/x-www-form-urlencoded'];
-            $body = http_build_query(
-                [
-                    'grant_type' => 'authorization_code',
-                    'code' => $code,
-                    'redirect_uri' => $redirectUri,
-                    'client_id' => $this->appId,
-                    'client_secret' => $this->appSecret,
-                ]
+            $url = $urlGenerator->getUrl('www', 'v1/access_token');
+           
+           $params = array(
+                'username' => $this->appId,
+                'password' => $this->appSecret
             );
 
-            $response = ResponseConverter::convertToArray($this->getRequestManager()->sendRequest('POST', $url, $headers, $body));
+           $query = [
+                'grant_type'=>'authorization_code',
+                'code'=>$code,
+                'redirect_uri'=>$redirectUri,
+            ];
+
+            $query = http_build_query($query);
+           
+            $error = null;
+            $url = $url.'?'.$query;
+            
+            $options[CURLOPT_USERAGENT] = 'onekampagne';
+            $options[CURLOPT_USERPWD] = $this->appId . ':' . $this->appSecret;
+            $options[CURLOPT_RETURNTRANSFER] = true;
+            $options[CURLOPT_CONNECTTIMEOUT] = 5;
+            $options[CURLOPT_TIMEOUT] = 10;
+            $options[CURLOPT_CUSTOMREQUEST] = 'POST';
+            $options[CURLOPT_POSTFIELDS] = $params;
+                
+            $ch = curl_init($url);
+            curl_setopt_array($ch, $options);
+            $response_raw = curl_exec($ch);
+            $response = json_decode($response_raw, true);
+            
         } catch (RedditTransferException $e) {
             // most likely that user very recently revoked authorization.
             // In any event, we don't have an access token, so throw an exception.
             throw new RedditException('Could not get access token: The user may have revoked the authorization response from Reddit.com was empty.', $e->getCode(), $e);
         }
 
-        if (empty($response)) {
-            throw new RedditException('Could not get access token: The response from Reddit.com was empty.');
-        }
-
-        $tokenData = array_merge(['access_token' => null, 'expires_in' => null], $response);
-        $token = new AccessToken($tokenData['access_token'], $tokenData['expires_in']);
-
+        $token = new AccessToken($response);
+        $token->setAccessToken($response['access_token']??null);
+        
         if (!$token->hasToken()) {
-            throw new RedditException('Could not get access token: The response from Reddit.com did not contain a token.');
+            throw new RedditException('Could not get access token: The response from reddit.com did not contain a token.');
         }
 
-        return $token;
+        return $response;
+    }
+
+    public function fetchNewPermanentAccessToken(RedditUrlGeneratorInterface $urlGenerator, $refreshToken)
+    {
+       
+        if (empty($refreshToken)) {
+            throw new RedditException('Could not get access token: The refresh token was empty.');
+        }
+
+        $redirectUri = $this->getStorage()->get('redirect_uri');
+
+        try {
+            $url = $urlGenerator->getUrl('www', 'v1/access_token');
+           
+           $params = array(
+                'username' => $this->appId,
+                'password' => $this->appSecret
+            );
+
+           $query = [
+                'grant_type'=>'refresh_token',
+                'duration'=>'permanent',
+                'refresh_token'=>$refreshToken
+            ];
+
+            $query = http_build_query($query);
+           
+            $error = null;
+            $url = $url.'?'.$query;
+            
+            $options[CURLOPT_USERAGENT] = 'onekampagne';
+            $options[CURLOPT_USERPWD] = $this->appId . ':' . $this->appSecret;
+            $options[CURLOPT_RETURNTRANSFER] = true;
+            $options[CURLOPT_CONNECTTIMEOUT] = 5;
+            $options[CURLOPT_TIMEOUT] = 10;
+            $options[CURLOPT_CUSTOMREQUEST] = 'POST';
+            $options[CURLOPT_POSTFIELDS] = $params;
+                
+            $ch = curl_init($url);
+            curl_setopt_array($ch, $options);
+            $response_raw = curl_exec($ch);
+            $response = json_decode($response_raw,true);
+            
+        } catch (RedditTransferException $e) {
+            // most likely that user very recently revoked authorization.
+            // In any event, we don't have an access token, so throw an exception.
+            throw new RedditException('Could not get access token: The user may have revoked the authorization response from reddit.com was empty.', $e->getCode(), $e);
+        }
+
+        if (empty($response)) {
+            throw new RedditException('Could not get access token: The response from reddit.com was empty.');
+        }
+
+        $token = new AccessToken($response);
+        $token->setAccessToken($response['access_token']??null);
+        if (!$token->hasToken()) {
+            throw new RedditException('Could not get access token: The response from reddit.com did not contain a token.');
+        }
+
+        return $response;
     }
 
     /**
@@ -187,8 +264,9 @@ class Authenticator implements AuthenticatorInterface
      */
     protected function getCode()
     {
-        $storage = $this->getStorage();
 
+        $storage = $this->getStorage();
+        return GlobalVariableGetter::get('code');
         if (!GlobalVariableGetter::has('code')) {
             return;
         }

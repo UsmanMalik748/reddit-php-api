@@ -56,21 +56,21 @@ class UrlGeneratorTest extends \PHPUnit_Framework_TestCase
     {
         $gen = new DummyUrlGenerator();
 
-        $expected = 'https://api.Reddit.com/?bar=baz';
+        $expected = 'https://api.reddit/?bar=baz';
         $this->assertEquals($expected, $gen->getUrl('api', '', ['bar' => 'baz']), 'No path');
 
-        $expected = 'https://api.Reddit.com/foobar';
+        $expected = 'https://api.reddit/foobar';
         $this->assertEquals($expected, $gen->getUrl('api', 'foobar'), 'Path does not begin with forward slash');
         $this->assertEquals($expected, $gen->getUrl('api', '/foobar'), 'Path begins with forward slash');
 
-        $expected = 'https://api.Reddit.com/foobar?bar=baz';
+        $expected = 'https://api.reddit/foobar?bar=baz';
         $this->assertEquals($expected, $gen->getUrl('api', 'foobar', ['bar' => 'baz']), 'One parameter');
 
-        $expected = 'https://api.Reddit.com/foobar?bar=baz&a=b&c=d';
+        $expected = 'https://api.reddit/foobar?bar=baz&a=b&c=d';
         $this->assertEquals($expected, $gen->getUrl('api', 'foobar', ['bar' => 'baz', 'a' => 'b', 'c' => 'd']), 'Many parameters');
 
-        $expected = 'https://api.Reddit.com/foobar?bar=baz%20a%20b';
-        $notExpected = 'https://api.Reddit.com/foobar?bar=baz+a+b';
+        $expected = 'https://api.reddit/foobar?bar=baz%20a%20b';
+        $notExpected = 'https://api.reddit/foobar?bar=baz+a+b';
         $this->assertEquals($expected, $gen->getUrl('api', 'foobar', ['bar' => 'baz a b']), 'Use of PHP_QUERY_RFC3986');
         $this->assertNotEquals($notExpected, $gen->getUrl('api', 'foobar', ['bar' => 'baz a b']), 'Dont use PHP_QUERY_RFC1738');
     }
@@ -79,10 +79,10 @@ class UrlGeneratorTest extends \PHPUnit_Framework_TestCase
     {
         $gen = new UrlGenerator();
 
-        $expected = 'https://api.Reddit.com/endpoint?bar=baz&format=json';
+        $expected = 'https://api.reddit/endpoint?bar=baz&format=json';
         $this->assertEquals($expected, $gen->getUrl('api', 'endpoint?bar=baz', ['format' => 'json']));
 
-        $expected = 'https://api.Reddit.com/endpoint?bar=baz&bar=baz';
+        $expected = 'https://api.reddit/endpoint?bar=baz&bar=baz';
         $this->assertEquals($expected, $gen->getUrl('api', 'endpoint?bar=baz', ['bar' => 'baz']));
     }
 

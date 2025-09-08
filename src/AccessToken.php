@@ -3,57 +3,168 @@
 namespace Usman\Reddit;
 
 /**
- * @author Usman Malik <malikdevelopers81@gmail.com>
+ * Class AccessToken
+ *
+ * Represents an OAuth access token and its associated data.
+ *
+ * @author Usman Malik
  */
 class AccessToken
 {
     /**
-     * @var null|string token
+     * @var string|null The access token string.
      */
-    private $token;
+    private $accessToken;
 
     /**
-     * @var \DateTime expiresAt
+     * @var string|null The refresh token string.
+     */
+    private $refreshToken;
+
+    /**
+     * @var string|null The token type (e.g., "bearer").
+     */
+    private $tokenType;
+
+    /**
+     * @var string|null The scope of the token.
+     */
+    private $scope;
+
+    /**
+     * @var array|[] The scope of the token.
+     */
+    private $response;
+
+    /**
+     * @var \DateTime|null Expiration date and time of the access token.
      */
     private $expiresAt;
 
     /**
-     * @param string        $token
-     * @param \DateTime|int $expiresIn
+     * Constructor
+     *
+     * Initializes the AccessToken using the response data.
+     *
+     * @param array $response Response containing token details.
+     *                        Keys expected: access_token, scope, expires_in, refresh_token, token_type
      */
-    public function __construct($token = null, $expiresIn = null)
+    public function __construct($response = [])
     {
-        $this->token = $token;
-
-        if ($expiresIn !== null) {
-            if ($expiresIn instanceof \DateTime) {
-                $this->expiresAt = $expiresIn;
-            } else {
-                $this->expiresAt = new \DateTime(sprintf('+%dseconds', $expiresIn));
+        if (is_array($response) && !empty($response)) {
+            $this->accessToken = $response['access_token'] ?? null;
+            $this->refreshToken = $response['refresh_token'] ?? null;
+            $this->tokenType = $response['token_type'] ?? null;
+            $this->scope = $response['scope'] ?? null;
+            $this->response = $response;
+            if (isset($response['expires_in'])) {
+                $this->expiresAt = (new \DateTime())->modify('+' . (int)$response['expires_in'] . ' seconds');
             }
+        } elseif (is_string($response)) {
+            $this->accessToken = $response;
         }
     }
 
-    /**
-     * @return string
-     */
-    public function __toString()
-    {
-        return $this->token ?: '';
-    }
-
-    /**
-     * Does a token string exist?
+     /**
+     * Set the access token string.
      *
-     * @return bool
+     * @param string|null $token
+     *
+     * @return $this
      */
-    public function hasToken()
+    public function setAccessToken($token)
     {
-        return !empty($this->token);
+        $this->token = $token;
+
+        return $this;
     }
 
     /**
-     * @param \DateTime $expiresAt
+     * Get the access token string.
+     *
+     * @return string|null
+     */
+    public function getAccessToken()
+    {
+        return $this->accessToken;
+    }
+
+    /**
+     * Set the refresh token string.
+     *
+     * @param string|null $refreshToken
+     *
+     * @return $this
+     */
+    public function setRefreshToken($refreshToken)
+    {
+        $this->refreshToken = $refreshToken;
+
+        return $this;
+    }
+
+    /**
+     * Get the refresh token string.
+     *
+     * @return string|null
+     */
+    public function getRefreshToken()
+    {
+        return $this->refreshToken;
+    }
+
+    /**
+     * Set the token type string.
+     *
+     * @param string|null $tokenType
+     *
+     * @return $this
+     */
+    public function setTokenType($tokenType)
+    {
+        $this->tokenType = $tokenType;
+
+        return $this;
+    }
+
+    /**
+     * Get the token type.
+     *
+     * @return string|null
+     */
+    public function getTokenType()
+    {
+        return $this->tokenType;
+    }
+
+    /**
+     * Set the scope string.
+     *
+     * @param string|null $scope
+     *
+     * @return $this
+     */
+    public function setScope($scope)
+    {
+        $this->scope = $scope;
+
+        return $this;
+    }
+
+    /**
+     * Get the scope of the token.
+     *
+     * @return string|null
+     */
+    public function getScope()
+    {
+        return $this->scope;
+    }
+
+    /**
+     * Set the expiration date and time.
+     *
+     * @param \DateTime|null $expiresAt
      *
      * @return $this
      */
@@ -65,7 +176,9 @@ class AccessToken
     }
 
     /**
-     * @return \DateTime
+     * Get the expiration date and time.
+     *
+     * @return \DateTime|null
      */
     public function getExpiresAt()
     {
@@ -73,22 +186,69 @@ class AccessToken
     }
 
     /**
-     * @param null|string $token
+     * Check if the token has expired.
+     *
+     * @return bool
+     */
+    public function isExpired()
+    {
+        return $this->expiresAt !== null && $this->expiresAt < new \DateTime();
+    }
+
+     /**
+     * Does a token string exist?
+     *
+     * @return bool
+     */
+    public function hasToken()
+    {
+        return !empty($this->token);
+    }
+
+    /**
+     * Update the access token and related details.
+     *
+     * @param array $response Response containing updated token details.
+     *                        Keys expected: access_token, scope, expires_in, refresh_token, token_type
      *
      * @return $this
      */
-    public function setToken($token)
+    public function setResponse(array $response)
     {
-        $this->token = $token;
+        if (isset($response['access_token'])) {
+            $this->setToken($response['access_token']);
+        }
+
+        if (isset($response['refresh_token'])) {
+            $this->setRefreshToken($response['refresh_token']);
+        }
+
+        if (isset($response['token_type'])) {
+            $this->setTokenType($response['token_type']);
+        }
+
+        if (isset($response['scope'])) {
+            $this->setScope($response['scope']);
+        }
+
+        if (isset($response['expires_in'])) {
+            $this->setExpiresAt(new \DateTime())->modify('+' . (int)$response['expires_in'] . ' seconds');
+        }
 
         return $this;
     }
 
+
     /**
-     * @return null|string
+     * Get the reponse and related details.
+     *
+     * @param array $response Response containing updated token details.
+     *                        Keys expected: access_token, scope, expires_in, refresh_token, token_type
+     *
+     * @return $this
      */
-    public function getToken()
+    public function getResponse()
     {
-        return $this->token;
+        return $this->response;
     }
 }

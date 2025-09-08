@@ -41,6 +41,14 @@ class Reddit implements RedditInterface
     protected $accessToken = null;
 
     /**
+     * The OAuth access token received in exchange for a valid authorization
+     * code.  null means the access token has yet to be determined.
+     *
+     * @var AccessToken
+     */
+    protected $refreshToken = null;
+
+    /**
      * @var string format
      */
     private $format;
@@ -70,6 +78,14 @@ class Reddit implements RedditInterface
      */
     private $urlGenerator;
 
+
+    private $debug;
+    private $enabled;
+    private $interval;
+    private $last_request;
+
+    private $user_agent;
+
     /**
      * Constructor.
      *
@@ -78,13 +94,19 @@ class Reddit implements RedditInterface
      * @param string $format           'json', 'xml'
      * @param string $responseDataType 'array', 'string', 'simple_xml' 'psr7', 'stream'
      */
-    public function __construct($appId, $appSecret, $format = '', $responseDataType = 'array')
+    public function __construct($appId, $appSecret, $format = 'json', $user_agent = 'demo_agent' ,$responseDataType = 'array')
     {
         $this->format = $format;
         $this->responseDataType = $responseDataType;
 
         $this->requestManager = new RequestManager();
         $this->authenticator = new Authenticator($this->requestManager, $appId, $appSecret);
+
+        $this->debug = false;
+        $this->enabled = true;
+        $this->interval = 2;    
+        $this->last_request = microtime(true) * 10000;
+        $this->user_agent = $user_agent;
     }
 
     /**
@@ -107,64 +129,120 @@ class Reddit implements RedditInterface
      */
     public function api($method, $resource, array $options = [])
     {
-        // Add access token to the headers
-        $options['headers']['Authorization'] = sprintf('Bearer %s', (string) $this->getAccessToken());
-
-        // Do logic and adjustments to the options
-        $requestFormat = $this->filterRequestOption($options);
-
-        // Generate an url
+        
         $url = $this->getUrlGenerator()->getUrl(
             'api',
             $resource,
             isset($options['query']) ? $options['query'] : []
         );
 
-        $body = isset($options['body']) ? $options['body'] : null;
-        $this->lastResponse = $this->getRequestManager()->sendRequest($method, $url, $options['headers'], $body);
-
-        //Get the response data format
-        if (isset($options['response_data_type'])) {
-            $responseDataType = $options['response_data_type'];
-        } else {
-            $responseDataType = $this->getResponseDataType();
+        $options[CURLOPT_RETURNTRANSFER] = true;
+        $options[CURLOPT_CONNECTTIMEOUT] = 10;
+        $options[CURLOPT_TIMEOUT] = 30;
+        $options[CURLOPT_USERAGENT] = $this->user_agent;
+        $options[CURLOPT_CUSTOMREQUEST] = $method;
+        $options[CURLOPT_HTTPHEADER][] = "Authorization: bearer" . (string) $this->getAccessToken();
+        if ($this->format) {
+            $options[CURLOPT_HTTPHEADER][] = "Content-Type: application/json";
         }
+        //Execution is placed in a loop in case CAPTCHA is required.
+        do {
+            //Prepare URL or POST parameters
+            if (isset($params)) {
+                if ($method == 'GET') {
+                    $url .= '?' . http_build_query($options);
+                } else {
+                    $options[CURLOPT_POSTFIELDS] = $options;
+                }
+            }
+            //Build cURL object
 
-        return ResponseConverter::convert($this->lastResponse, $requestFormat, $responseDataType);
+            $ch = curl_init($url);
+            curl_setopt_array($ch, $options);
+            //Wait on rate limiter if necessary
+            $this->wait();
+            //Print request URL for debug
+            if ($this->debug) {
+                echo $url . "\n";
+            }
+           
+            //Send request and close connection
+            $response_raw = curl_exec($ch);
+            curl_close($ch);
+            //Parse response
+            $response = json_decode($response_raw);
+            if ($json_error = json_last_error()) {
+                $response = $response_raw;
+            }
+            if (isset($response->json->captcha)) {
+                $params['iden'] = $response->json->captcha;
+                $params['captcha'] = $this->getCaptchaResponse($url,$response->json->captcha);
+                $needs_captcha = ($params['captcha'] === 'skip') ? false : true;
+            } else {
+                $needs_captcha = false;
+            }
+        } while ($needs_captcha);
+        
+        if ($this->format == 'STD') {
+            $this->lastResponse = $response;
+        } else {
+           $this->lastResponse = json_decode($response_raw, true);
+        }
+        
+        return $this->lastResponse;
+    }
+
+    private function getCaptchaResponse($url,$iden)
+    {
+        fwrite(STDERR, "\n==============================================================================\n");
+        fwrite(STDERR, "CAPTCHA REQUIRED!\nPlease visit this link and type in the letters you see in the picture.\n\n");
+        fwrite(STDERR, "{$url}/captcha/$iden\n");
+        fwrite(STDERR, "\n(Too hard? Leave blank to request another. To skip this command, type 'skip'.)");
+        fwrite(STDERR, "\n==============================================================================\n");
+        $answer = readline("Response: ");
+        return $answer;
     }
 
     /**
-     * Modify and filter the request options. Make sure we use the correct query parameters and headers.
-     *
-     * @param array &$options
-     *
-     * @return string the request format to use
+     * Enable the rate limiter, on by default.
      */
-    protected function filterRequestOption(array &$options)
+    public function enable()
     {
-        if (isset($options['json'])) {
-            $options['format'] = 'json';
-            $options['body'] = json_encode($options['json']);
-        } elseif (!isset($options['format'])) {
-            // Make sure we always have a format
-            $options['format'] = $this->getFormat();
-        }
+        $this->enabled = true;
+    }
 
-        // Set correct headers for this format
-        switch ($options['format']) {
-            case 'xml':
-                $options['headers']['Content-Type'] = 'text/xml';
-                break;
-            case 'json':
-                $options['headers']['Content-Type'] = 'application/json';
-                $options['headers']['x-li-format'] = 'json';
-                $options['query']['format'] = 'json';
-                break;
-            default:
-                // Do nothing
-        }
+    /**
+     * Disable the rate limiter.
+     * This is meant to allow you to perform requests in bursts, but me mindful of reddit's rate limits and your program's structure.
+     * https://github.com/reddit/reddit/wiki/API
+     */
+    public function disable()
+    {
+        $this->enabled = false;
+    }
 
-        return $options['format'];
+    /**
+     * Set the rate limiter to wait the specified number of seconds past the previous API call to make the next one.
+     * If this time has already elapsed during execution of other parts of the program, no wait is needed.
+     * @param int|float $interval Number of seconds that must elapse between each API call.
+     */
+    public function setInterval($interval)
+    {
+        $this->interval = $interval;
+    }
+
+    /**
+     * Used by Phapper object to wait until another API call can be made.
+     */
+
+    public function wait()
+    {
+        $now = microtime(true) * 10000;
+        $wait_until = $this->last_request + ($this->interval * 10000);
+        if ($this->enabled && $now < $wait_until) {
+            usleep(($wait_until - $now) * 100);
+        }
+        $this->last_request = microtime(true) * 10000;
     }
 
     /**
@@ -287,27 +365,54 @@ class Reddit implements RedditInterface
     /**
      * {@inheritdoc}
      */
+    public function getTemporaryToken()
+    {
+
+        if ($this->accessToken === null) {
+            if (null !== $response = $this->getAuthenticator()->fetchNewAccessToken($this->getUrlGenerator())) {
+                $this->setAccessToken($response);
+                $this->lastResponse = $response;
+            }
+        }
+        // return the new access token or null if none found
+        return $this->lastResponse;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function getParmanentToken($refreshToken)
+    {
+
+        $response = $this->getAuthenticator()->fetchNewPermanentAccessToken($this->getUrlGenerator(),$refreshToken);
+        $this->setAccessToken($response);
+        $this->lastResponse = $response;
+        // return the new access token or null if none found
+        return $this->lastResponse;
+    }
+
     public function getAccessToken()
     {
         if ($this->accessToken === null) {
-            if (null !== $newAccessToken = $this->getAuthenticator()->fetchNewAccessToken($this->getUrlGenerator())) {
-                $this->setAccessToken($newAccessToken);
+            $response = $this->getAuthenticator()->fetchNewAccessToken($this->getUrlGenerator());
+            if ($response !== null) {
+                $this->accessToken = new AccessToken($response);
             }
         }
 
-        // return the new access token or null if none found
-        return $this->accessToken;
+        // Return the accessToken string if set, or null otherwise
+        return $this->accessToken ? $this->accessToken->getAccessToken() : null;
     }
 
     /**
      * {@inheritdoc}
      */
     public function setAccessToken($accessToken)
-    {
+    { 
+        
         if (!($accessToken instanceof AccessToken)) {
             $accessToken = new AccessToken($accessToken);
         }
-
         $this->accessToken = $accessToken;
 
         return $this;

@@ -36,7 +36,7 @@ class RequestManager implements RequestManagerInterface
         try {
             return $this->getHttpClient()->sendRequest($request);
         } catch (TransferException $e) {
-            throw new RedditTransferException('Error while requesting data from Reddit.com: '.$e->getMessage(), $e->getCode(), $e);
+            throw new RedditTransferException('Error while requesting data from reddit.com: '.$e->getMessage(), $e->getCode(), $e);
         }
     }
 
